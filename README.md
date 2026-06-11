@@ -2,7 +2,7 @@
 
 Append-only, hash-chained log of AI market predictions, committed **before** the outcome and scored against realized returns.
 
-This repository is the public anchor for [RiverAlpha](https://riveralpha.vercel.app). It is updated automatically once per day by CI. The git commit history is an independent, tamper-evident timestamp: a prediction cannot be inserted or altered after the fact without breaking every subsequent hash and rewriting public history.
+This repository is the public anchor for [RiverAlpha](https://river-alpha-web.vercel.app). It is updated automatically once per day by CI. The git commit history is an independent, tamper-evident timestamp: a prediction cannot be inserted or altered after the fact without breaking every subsequent hash and rewriting public history.
 
 **Don't trust us — verify.** Everything needed to check the chain is in this repo.
 
@@ -11,13 +11,16 @@ This repository is the public anchor for [RiverAlpha](https://riveralpha.vercel.
 ```
 data/log/crypto/rounds.jsonl   # one line per round: predictions, entry prices, hashes
 data/log/crypto/scores.jsonl   # one line per (round, horizon) resolution: realized returns, IC, alpha
-verify.py                      # self-contained chain verifier (stdlib only)
+verify.py                      # self-contained chain verifier (Python, stdlib only)
+verify.mjs                     # same verifier in Node (no dependencies)
 ```
 
 ## Verify the chain
 
 ```bash
 python verify.py
+# or
+node verify.mjs data/log/crypto/rounds.jsonl
 ```
 
 It recomputes every payload hash, merkle root, and chain hash from the raw
@@ -48,7 +51,7 @@ concatenated hex strings (with the 2-char domain tag prefix).
 - Skill metric: Spearman rank IC across the universe; portfolio = equal-weight top-2, 20 bps cost; alpha vs BTC.
 - A track record is labeled significant only at n ≥ 30 resolved rounds and |t| > 2.
 
-Full methodology: https://riveralpha.vercel.app/methodology
+Full methodology: https://river-alpha-web.vercel.app/methodology
 
 ## Disclaimer
 
