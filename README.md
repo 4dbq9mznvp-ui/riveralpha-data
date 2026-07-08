@@ -33,6 +33,15 @@ prediction makes it fail.
   (equivalent to Python `json.dumps(x, sort_keys=True, separators=(",", ":"), ensure_ascii=False)`).
 - Payload hash per prediction: `sha256(canonical_json({participantId, roundId, signal}))` (hex).
   Binding `roundId` makes signals non-replayable across rounds.
+- **Evidence binding (rounds committed from 2026-07-09).** Each prediction also
+  carries an `evidenceHash` covering its audit trail:
+  `evidenceHash = sha256(canonical_json({modelRequested, modelUsed, params, promptHash, rationale, raw}))`,
+  and the payload becomes
+  `sha256(canonical_json({evidenceHash, participantId, roundId, signal}))`.
+  So the model id, parameters, prompt hash, stated rationale, and raw response
+  are tamper-evident too, not just the signal. Predictions without
+  `evidenceHash` (earlier rounds) keep the original payload format and still
+  verify unchanged.
 - Merkle tree (RFC 6962-style domain separation), leaves sorted by `participantId`:
   - leaf node: `sha256("00" + payload_hash_hex)`
   - internal node: `sha256("01" + left_hex + right_hex)`
@@ -43,13 +52,16 @@ prediction makes it fail.
 All hashes are lowercase hex; hash inputs are the UTF-8 bytes of the
 concatenated hex strings (with the 2-char domain tag prefix).
 
-## Scoring (methodology v0.1, summary)
+## Scoring (summary)
 
 - Signal: expected 7-day return (%) for every asset in the universe; scored at 1d/7d/30d horizons.
-- Entry: multi-exchange median spot (Coinbase, Gemini, Bitstamp; USD) at commit time.
+- Entry: multi-exchange median spot (Coinbase, Gemini, Bitstamp, Kraken; USD) at commit time.
 - Exit: close of the 1-hour candle containing `commit + horizon`, median across the same exchanges.
 - Skill metric: Spearman rank IC across the universe; portfolio = equal-weight top-2, 20 bps cost; alpha vs BTC.
-- A track record is labeled significant only at n ≥ 30 resolved rounds and |t| > 2.
+- A track record is labeled significant only at n ≥ 30 independent resolved rounds and |t| > 2;
+  multi-day horizons count only non-overlapping windows.
+- The methodology is versioned (currently v0.3); every round and score records the
+  version it ran under, and records are never pooled across versions.
 
 Full methodology: https://river-alpha-web.vercel.app/methodology
 

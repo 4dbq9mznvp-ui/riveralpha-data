@@ -50,6 +50,21 @@ def main() -> int:
                     "roundId": r["roundId"],
                     "signal": p["signal"],
                 }
+                if "evidenceHash" in p:
+                    # 2026-07-09~: audit evidence (model, params, prompt hash,
+                    # rationale, raw response) is also bound into the leaf.
+                    ev = H(canon({
+                        "modelRequested": p["modelRequested"],
+                        "modelUsed": p["modelUsed"],
+                        "params": p["params"],
+                        "promptHash": p["promptHash"],
+                        "rationale": p["rationale"],
+                        "raw": p["raw"],
+                    }))
+                    if ev != p["evidenceHash"]:
+                        print(f"FAIL {r['roundId']}: evidence hash mismatch ({p['participantId']})")
+                        return 1
+                    payload["evidenceHash"] = p["evidenceHash"]
                 h = H(canon(payload))
                 if "payloadHash" in p and h != p["payloadHash"]:
                     print(f"FAIL {r['roundId']}: payload hash mismatch ({p['participantId']})")

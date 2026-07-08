@@ -21,11 +21,30 @@ const merkle = (leaves) => {
 
 let chain = H("hangang-pj/genesis");
 let n = 0;
-for (const line of readFileSync(process.argv[2], "utf8").trim().split("\n")) {
+const path = process.argv[2] ?? "data/log/crypto/rounds.jsonl";
+for (const line of readFileSync(path, "utf8").trim().split("\n")) {
   const r = JSON.parse(line);
   const leaves = [...r.predictions]
     .sort((a, b) => (a.participantId < b.participantId ? -1 : 1))
-    .map((p) => H(canon({ participantId: p.participantId, roundId: r.roundId, signal: p.signal })));
+    .map((p) => {
+      const payload = { participantId: p.participantId, roundId: r.roundId, signal: p.signal };
+      if (p.evidenceHash) {
+        // 2026-07-09~: 감사 증거(모델·파라미터·promptHash·rationale·원응답)도 leaf에 바인딩
+        const ev = H(canon({
+          modelRequested: p.modelRequested,
+          modelUsed: p.modelUsed,
+          params: p.params,
+          promptHash: p.promptHash,
+          rationale: p.rationale,
+          raw: p.raw,
+        }));
+        if (ev !== p.evidenceHash) throw new Error(`${r.roundId}: evidence mismatch (${p.participantId})`);
+        payload.evidenceHash = p.evidenceHash;
+      }
+      const h = H(canon(payload));
+      if (p.payloadHash && h !== p.payloadHash) throw new Error(`${r.roundId}: payload mismatch (${p.participantId})`);
+      return h;
+    });
   const root = merkle(leaves);
   if (root !== r.merkleRoot) throw new Error(`${r.roundId}: merkle mismatch`);
   if (r.prevChainHash !== chain) throw new Error(`${r.roundId}: prev mismatch`);
