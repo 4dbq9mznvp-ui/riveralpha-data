@@ -121,7 +121,10 @@ evidence.
   - internal node: `sha256("01" + left_hex + right_hex)`
   - odd node count per level: last node is duplicated
 - Chain: `chain = sha256("02" + prev_chain_hex + merkle_root_hex)`,
-  with genesis `sha256("hangang-pj/genesis")`.
+  with genesis `sha256("hangang-pj/genesis")`. The `hangang-pj` string is the
+  project's original working name, retained verbatim because the genesis seed is
+  fixed: changing it would invalidate the chain of every round already committed.
+  It is not a separate project.
 
 All hashes are lowercase hex; hash inputs are the UTF-8 bytes of the
 concatenated hex strings (with the 2-char domain tag prefix).
