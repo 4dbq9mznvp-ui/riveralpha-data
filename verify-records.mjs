@@ -4,7 +4,11 @@ import { readFileSync } from "node:fs";
 
 const DOMAIN = "riveralpha/record-integrity/v1";
 const VERSION = 1;
-const DATA_SCHEMA_VERSION = "v0.4";
+// 엔진(packages/engine/src/record-integrity.ts)과 반드시 같은 목록을 유지할 것.
+// 옛 버전을 빼면 그 버전으로 커밋된 보호 레코드가 검증 불가가 된다 — 추가만, 제거 금지.
+//   v0.4 : executionContext 이전 payload
+//   v0.5 : executionContext(호가·거래대금 스냅샷)가 보호 payload에 포함
+const SUPPORTED_DATA_SCHEMA_VERSIONS = ["v0.4", "v0.5"];
 
 function fail(message) {
   throw new Error(message);
@@ -46,7 +50,12 @@ function hashPayload(value) {
 }
 
 function roundPayload(record) {
+  // v0.4로 커밋된 레코드는 executionContext 키 없이 해싱됐다. 그 버전에 키를 끼워넣으면
+  // 이미 커밋된 보호 라운드가 전부 검증 불가가 된다(append-only라 재작성 불가).
+  const executionContext =
+    record.dataSchemaVersion === "v0.4" ? {} : { executionContext: record.executionContext ?? null };
   return {
+    ...executionContext,
     v: record.v,
     dataSchemaVersion: record.dataSchemaVersion,
     roundId: record.roundId,
@@ -116,9 +125,10 @@ function verifyOptionalChain(kind, records, payloadFor) {
     if (!record.dataSchemaVersion) {
       fail(`${kind} record ${index}: missing dataSchemaVersion`);
     }
-    if (record.dataSchemaVersion !== DATA_SCHEMA_VERSION) {
+    if (!SUPPORTED_DATA_SCHEMA_VERSIONS.includes(record.dataSchemaVersion)) {
       fail(
-        `${kind} record ${index}: unsupported dataSchemaVersion "${record.dataSchemaVersion}" (expected "${DATA_SCHEMA_VERSION}")`,
+        `${kind} record ${index}: unsupported dataSchemaVersion "${record.dataSchemaVersion}"` +
+          ` (supported: ${SUPPORTED_DATA_SCHEMA_VERSIONS.join(", ")})`,
       );
     }
     const expectedPrev = started ? latest : null;

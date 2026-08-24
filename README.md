@@ -12,15 +12,47 @@ publication time, source prices, recorded scores, or model-provider responses.
 
 ## Version boundaries
 
-- **Data/Audit Schema `v0.4`** identifies the fields and protected payload of
-  future round and score records (`dataSchemaVersion: "v0.4"`).
+- **Data/Audit Schema `v0.5`** identifies the fields and protected payload of
+  future round and score records (`dataSchemaVersion: "v0.5"`).
+  `v0.4` remains supported and is not rewritten: records committed under it are
+  hashed with the payload that version defined.
 - **Methodology `v0.3`** identifies forecast inputs and scoring conditions.
 - **Record Integrity Format `v1`** (`recordIntegrity.version: 1`) identifies the
-  separate round/score hash envelope and linkage rules.
+  separate round/score hash envelope and linkage rules. It is unchanged by the
+  `v0.5` schema bump — the envelope, domain, and linkage rules are identical.
 
-These are independent versions. Existing JSONL is not backfilled. The first
-future protected record must declare supported Data/Audit Schema `v0.4`, and
+These are independent versions. Existing JSONL is not backfilled. A protected
+record must declare a supported Data/Audit Schema version, and
 `verify-records.mjs` includes that value in its recomputed payload hash.
+
+### What changed in `v0.5`
+
+Round records gained `executionContext`, recorded so that slippage, funding cost,
+and capacity can be reconstructed later. It holds two independent snapshots:
+
+- `sources` — per asset, each spot venue's best bid, best ask, and 24-hour traded
+  volume at commit time, from the same four venues that provide reference prices.
+- `funding` — per asset, the current perpetual-futures funding rate on Binance
+  and Bybit, with the venue's funding interval and next funding time.
+
+`rate` is the relative rate for **one interval**, not an annual figure.
+Annualising is `rate × (24 / intervalHours) × 365`, and the interval differs by
+venue and symbol, so a rate without its interval cannot be annualised correctly.
+Both are stored as reported rather than normalised.
+
+**Neither snapshot is an input to scoring.** Entry prices, realized returns, and
+every published score are computed exactly as before, from the four spot venues
+only. Binance and Bybit appear here and nowhere else: they are the perpetual
+venues, they are recorded for cost reconstruction, and if they were wrong or
+disappeared no past score would change. Because the value sits inside the
+protected payload from `v0.5` on, altering a recorded quote or rate breaks the
+round record hash.
+
+Collection is best-effort and the two halves fail independently: if a venue
+cannot be reached the round still commits, and the affected half records
+`{"status": "degraded", …, "reason": …}` rather than being silently omitted.
+Quotes are stored as reported — a very wide spread is a real market state and is
+not filtered out.
 
 ## Layout
 
@@ -71,10 +103,11 @@ node verify-records.mjs data/log/crypto/rounds.jsonl data/log/crypto/scores.json
 ```
 
 Rounds and scores created after the optional record chains begin carry
-`dataSchemaVersion: "v0.4"` and
+`dataSchemaVersion` and
 `recordIntegrity = {version, prevRecordHash, recordHash}`. The round payload
 covers its prediction chain references, commit time, methodology, horizons,
-universe, entry prices and sources, failures, misses, and optional receipt. The
+universe, entry prices and sources, failures, misses, optional receipt, and —
+from `v0.5` — the commit-time execution snapshot. The
 score payload covers its resolution timestamps, exit prices and sources,
 realized returns, benchmark and scoring configuration, participant scores, and
 references to the source round's prediction chain and optional round record
