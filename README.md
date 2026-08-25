@@ -32,8 +32,26 @@ and capacity can be reconstructed later. It holds two independent snapshots:
 
 - `sources` — per asset, each spot venue's best bid, best ask, and 24-hour traded
   volume at commit time, from the same four venues that provide reference prices.
-- `funding` — per asset, the current perpetual-futures funding rate on Binance
-  and Bybit, with the venue's funding interval and next funding time.
+- `funding` — per asset, the current perpetual-futures funding rate on each venue
+  that answered (Binance, Bybit, Kraken Futures), with that venue's funding
+  interval and next funding time. Venues are attempted independently and the keys
+  show which ones replied; access differs by region, so a venue reachable from one
+  environment may be blocked from another.
+
+  Kraken reports an **absolute** funding figure rather than a relative rate, so
+  its `rate` here is derived as `fundingRate / markPrice` on a one-hour interval.
+  That derivation is an interpretation of the venue's semantics, so the
+  pre-conversion values are also kept in `raw` — if the interpretation is wrong,
+  the record still holds enough to recompute. Venues that publish a relative rate
+  directly have no `raw`.
+- `candidates` — a daily snapshot of every asset listed on at least three of the
+  four spot venues, whether or not it is in the current universe: exchange count,
+  median last price, and summed 24-hour USD volume. This exists so a future
+  universe change can be judged against a multi-day record rather than a single
+  reading taken on the day of the decision. Assets outside the universe have no
+  price history anywhere else in this log, so it cannot be reconstructed later.
+  Stablecoins and wrapped tokens are excluded; `listed` counts exchanges, not
+  trading pairs.
 
 `rate` is the relative rate for **one interval**, not an annual figure.
 Annualising is `rate × (24 / intervalHours) × 365`, and the interval differs by
