@@ -2,7 +2,7 @@
 
 Append-only, hash-chained log of AI market predictions, committed **before** the outcome and scored against realized returns.
 
-This repository is the public data mirror for [RiverAlpha](https://river-alpha-web.vercel.app). It is updated automatically once per day by CI. Its visible git history provides publication evidence, while the hash chain makes changes to already-published prediction payloads detectable. The repository remains operator-controlled and is not an independent timestamp authority.
+This repository is the public data mirror for [RiverAlpha](https://river-alpha-web.vercel.app). It is updated automatically once per day by CI. Its visible git history provides publication evidence, while the hash chain makes changes to already-published prediction payloads detectable. The repository itself remains operator-controlled, but from 2026-08-26 the chain heads are additionally committed to an external timestamp that the operator does not control — see [Verify the external anchors](#verify-the-external-anchors).
 
 Everything needed to check the published prediction hash chain is in this repo.
 
@@ -77,10 +77,15 @@ not filtered out.
 ```
 data/log/crypto/rounds.jsonl   # one line per round: predictions, entry prices, hashes
 data/log/crypto/scores.jsonl   # one line per (round, horizon) resolution: realized returns, IC, alpha
+data/anchor/crypto/
+  anchors.jsonl                # append-only index: one line per external anchor
+  <anchorId>.anchor.json       # the exact bytes that were timestamped
+  <anchorId>.anchor.json.ots   # OpenTimestamps proof for those bytes
 verify.py                      # self-contained chain verifier (Python, stdlib only)
 verify.mjs                     # same verifier in Node (no dependencies)
 verify-scores.mjs              # recomputes realized returns and every recorded score
 verify-records.mjs             # verifies optional round-metadata and score-record chains
+verify-anchors.mjs             # verifies external timestamps against the log prefix
 ```
 
 ## Verify the chain
@@ -139,6 +144,65 @@ The verifier rejects payload changes, a missing protected record, a chain
 restart, and mismatched score-to-round references. With the current legacy-only
 files it reports `0 protected` explicitly rather than implying historical
 coverage. Empty round or score files fail.
+
+## Verify the external anchors
+
+```bash
+node verify-anchors.mjs data/log/crypto/rounds.jsonl data/log/crypto/scores.jsonl data/anchor/crypto
+# add --check-bitcoin to also fetch block merkle roots from blockstream.info
+```
+
+Every hash chain above proves only that this log is *internally* consistent. An
+operator who recomputed the whole log could produce a different history that
+still verifies. Detecting that requires comparing against something observed
+earlier — which is what an external anchor provides, without asking you to trust
+the operator or this repository.
+
+Periodically the three chain heads (`predictionChainHash`, `roundRecordHash`,
+`scoreRecordHash`) plus the covered record counts are written into a small
+canonical JSON file and timestamped with
+[OpenTimestamps](https://opentimestamps.org), which aggregates digests into the
+Bitcoin blockchain. The anchor file's own SHA-256 **is** the timestamped digest,
+so the standard client verifies it directly with no RiverAlpha code involved:
+
+```bash
+ots verify data/anchor/crypto/<anchorId>.anchor.json.ots
+```
+
+`verify-anchors.mjs` additionally checks what the standard client cannot: that
+the heads recorded in each anchor still match the values recomputed from the
+**first N records** of the current log. If a past round or score were rewritten,
+added, or removed, the recomputed prefix would no longer reproduce the anchored
+heads and verification fails.
+
+Two states matter and the verifier always distinguishes them:
+
+- **Pending** — a calendar server accepted the digest and returned a receipt.
+  This is *not* independent evidence yet; it only says a calendar claims to have
+  seen the value. Calendars normally commit to a Bitcoin block within hours.
+- **Bitcoin-confirmed** — the proof resolves to a block header merkle root. The
+  anchored log state provably existed before that block was mined, and no later
+  rewrite can claim an earlier time. With `--check-bitcoin` the verifier fetches
+  the block from blockstream.info and compares merkle roots; without it, the
+  computed merkle root and block height are printed so you can check them in any
+  block explorer.
+
+What an anchor does **not** prove: that any individual prediction was made
+before its outcome was known (the anchor bounds the whole log state, at the
+resolution of the anchoring cadence and the calendar's block delay), that
+recorded prices are accurate, or that a model provider truly returned a given
+response. It bounds *when this exact log state existed*, nothing more.
+
+Anchor payload files are immutable and `anchors.jsonl` is append-only. Proof
+files grow monotonically — upgrading a pending receipt to a Bitcoin proof only
+adds branches, never removes evidence.
+
+Some anchors also carry a `.sigstore.json` bundle: a
+[Sigstore](https://www.sigstore.dev) signature recorded in the public Rekor
+transparency log. It confirms almost immediately rather than in hours, but it is
+bound to this repository's GitHub Actions identity, so it is a weaker and
+differently-shaped witness than the Bitcoin proof. Treat the two as
+complementary, not redundant.
 
 ## Optional public round receipt
 
