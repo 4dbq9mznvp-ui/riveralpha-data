@@ -252,6 +252,86 @@ async function bitcoinMerkleRoot(height) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * 문서 스탬프 검증 — 체인이 아니라 **파일 내용**이 언제부터 이 상태였는지를 본다.
+ * 사전등록 계획처럼 데이터보다 먼저 고정됐음을 보여야 하는 파일에 쓴다.
+ */
+async function verifyDocuments(anchorDir, repoRoot, checkBitcoin) {
+  const indexPath = join(anchorDir, "documents.jsonl");
+  if (!existsSync(indexPath)) {
+    console.log("document verification OK: no documents stamped yet");
+    return;
+  }
+  const docs = readJsonl(indexPath, "documents");
+  if (docs.length === 0) {
+    console.log("document verification OK: no documents stamped yet");
+    return;
+  }
+
+  let confirmed = 0;
+  let pendingOnly = 0;
+  let changed = 0;
+
+  for (const doc of docs) {
+    const label = doc.path ?? "?";
+    const filePath = join(repoRoot, doc.path);
+    const otsPath = join(repoRoot, doc.otsFile);
+    if (!existsSync(otsPath)) fail(`${label}: proof file missing (${doc.otsFile})`);
+
+    const detached = parseDetachedOts(readFileSync(otsPath));
+    if (detached.digest.toString("hex") !== doc.sha256) {
+      fail(`${label}: proof digest ${detached.digest.toString("hex")} != recorded ${doc.sha256}`);
+    }
+
+    // 파일이 남아 있으면 현재 내용이 스탬프된 내용인지 본다. 다르면 실패가 아니라
+    // **사실 보고**다 — 옛 증거는 옛 내용에 대해 여전히 유효하고, 바뀌었다는 것
+    // 자체가 독자가 알아야 할 정보다.
+    let matchesNow = null;
+    if (existsSync(filePath)) {
+      matchesNow = sha256Hex(readFileSync(filePath)) === doc.sha256;
+      if (!matchesNow) changed++;
+    }
+
+    const bitcoin = detached.attestations.filter((s) => s.attestation.type === "bitcoin");
+    const pending = detached.attestations.filter((s) => s.attestation.type === "pending");
+    const state = matchesNow === null ? "file absent" : matchesNow ? "current" : "SUPERSEDED";
+
+    if (bitcoin.length === 0) {
+      pendingOnly++;
+      console.log(`~ ${label}  PENDING via ${new Set(pending.map((s) => s.attestation.uri)).size} calendar(s)  [${state}]`);
+      continue;
+    }
+    confirmed++;
+    for (const site of bitcoin) {
+      const height = site.attestation.height;
+      const merkleRoot = Buffer.from(site.msg).reverse().toString("hex");
+      if (!checkBitcoin) {
+        console.log(`✔ ${label}  bitcoin block ${height}  [${state}]`);
+        console.log(`    merkle root: ${merkleRoot}`);
+        continue;
+      }
+      const block = await bitcoinMerkleRoot(height);
+      if (block.merkleRoot !== merkleRoot) {
+        fail(`${label}: block ${height} merkle root mismatch (proof ${merkleRoot}, chain ${block.merkleRoot})`);
+      }
+      console.log(
+        `✔ ${label}  bitcoin block ${height} @ ${new Date(block.timestamp * 1000).toISOString()}  [${state}]`,
+      );
+    }
+  }
+
+  console.log(
+    `\ndocument verification OK: ${docs.length} stamp(s); ${confirmed} bitcoin-confirmed, ${pendingOnly} pending` +
+      (changed > 0 ? `; ${changed} superseded by a later edit` : ""),
+  );
+  if (changed > 0) {
+    console.log(
+      "NOTE: a SUPERSEDED stamp still proves what the file said when it was stamped.\n" +
+        "      It does not cover the current text — that needs its own stamp.",
+    );
+  }
+}
+
 async function verify(roundsPath, scoresPath, anchorDir, checkBitcoin) {
   const indexPath = join(anchorDir, "anchors.jsonl");
   if (!existsSync(indexPath)) {
@@ -402,16 +482,22 @@ async function verify(roundsPath, scoresPath, anchorDir, checkBitcoin) {
 
 const args = process.argv.slice(2);
 const checkBitcoin = args.includes("--check-bitcoin");
+const documentsOnly = args.includes("--documents");
 const positional = args.filter((arg) => !arg.startsWith("--"));
 
 try {
-  await verify(
-    positional[0] ?? "data/log/crypto/rounds.jsonl",
-    positional[1] ?? "data/log/crypto/scores.jsonl",
-    positional[2] ?? "data/anchor/crypto",
-    checkBitcoin,
-  );
+  if (documentsOnly) {
+    await verifyDocuments(positional[0] ?? "data/anchor", positional[1] ?? ".", checkBitcoin);
+  } else {
+    await verify(
+      positional[0] ?? "data/log/crypto/rounds.jsonl",
+      positional[1] ?? "data/log/crypto/scores.jsonl",
+      positional[2] ?? "data/anchor/crypto",
+      checkBitcoin,
+    );
+  }
 } catch (error) {
-  console.error(`anchor verification FAILED: ${error instanceof Error ? error.message : String(error)}`);
+  const kind = documentsOnly ? "document" : "anchor";
+  console.error(`${kind} verification FAILED: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 }
