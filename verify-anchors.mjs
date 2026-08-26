@@ -333,11 +333,29 @@ async function verify(roundsPath, scoresPath, anchorDir, checkBitcoin) {
     const bitcoin = detached.attestations.filter((site) => site.attestation.type === "bitcoin");
     const pending = detached.attestations.filter((site) => site.attestation.type === "pending");
 
+    // 6. Sigstore 번들은 **있다는 사실만** 보고한다. 서명 검증에는 X.509 체인 검증,
+    // DSSE, Rekor 포함증명이 필요해서 의존성 없는 스크립트의 범위를 넘는다. 검증한
+    // 척하는 것보다, 있다는 것과 여기서 검증하지 않았다는 것을 함께 말하는 편이 낫다.
+    // 실제 검증 명령은 README의 "Verify the external anchors" 절에 있다.
+    const reportSigstore = () => {
+      const bundlePath = join(anchorDir, `${anchor.payloadFile}.sigstore.json`);
+      if (!existsSync(bundlePath)) return;
+      let bundle;
+      try {
+        bundle = JSON.parse(readFileSync(bundlePath, "utf8"));
+      } catch (error) {
+        fail(`${label}: sigstore bundle is not valid JSON (${error.message})`);
+      }
+      const index = bundle.verificationMaterial?.tlogEntries?.[0]?.logIndex;
+      console.log(`    sigstore bundle present${index ? ` (rekor log index ${index})` : ""} — not verified by this script`);
+    };
+
     if (bitcoin.length === 0) {
       pendingOnly++;
       const uris = [...new Set(pending.map((site) => site.attestation.uri))];
       console.log(`~ ${label}  rounds≤${anchor.scope.roundCount}  PENDING via ${uris.length} calendar(s)`);
       for (const uri of uris) console.log(`    pending: ${uri}`);
+      reportSigstore();
       continue;
     }
 
@@ -366,6 +384,7 @@ async function verify(roundsPath, scoresPath, anchorDir, checkBitcoin) {
     if (pending.length > 0) {
       console.log(`    (${pending.length} pending branch(es) also present)`);
     }
+    reportSigstore();
   }
 
   const suffix = checkBitcoin ? " (block merkle roots checked against blockstream.info)" : "";

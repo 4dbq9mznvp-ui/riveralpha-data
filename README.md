@@ -187,22 +187,45 @@ Two states matter and the verifier always distinguishes them:
   computed merkle root and block height are printed so you can check them in any
   block explorer.
 
-What an anchor does **not** prove: that any individual prediction was made
-before its outcome was known (the anchor bounds the whole log state, at the
-resolution of the anchoring cadence and the calendar's block delay), that
-recorded prices are accurate, or that a model provider truly returned a given
-response. It bounds *when this exact log state existed*, nothing more.
+Each round is anchored in the same CI job that creates it, before its scores are
+resolved, so a prediction reaches the calendars within seconds. The remaining
+interval is the calendar's own block-commitment delay — typically 30 minutes to
+2 hours. For a forecast scored at 1, 7, and 30 days, that interval sits well
+inside the shortest horizon, so a confirmed anchor does place the prediction
+before its own outcome. It is an interval, though, not zero.
+
+What an anchor does **not** prove: that recorded prices are accurate, or that a
+model provider truly returned a given response. And an anchor commits to the
+whole log state, not to one row: it says this entire prefix existed before a
+given block, which is a statement about the file, not a per-prediction receipt.
 
 Anchor payload files are immutable and `anchors.jsonl` is append-only. Proof
 files grow monotonically — upgrading a pending receipt to a Bitcoin proof only
 adds branches, never removes evidence.
 
-Some anchors also carry a `.sigstore.json` bundle: a
+Anchors also carry a `.sigstore.json` bundle: a
 [Sigstore](https://www.sigstore.dev) signature recorded in the public Rekor
-transparency log. It confirms almost immediately rather than in hours, but it is
-bound to this repository's GitHub Actions identity, so it is a weaker and
-differently-shaped witness than the Bitcoin proof. Treat the two as
-complementary, not redundant.
+transparency log. It confirms in seconds rather than hours, but it is bound to
+this repository's GitHub Actions identity, so it is a differently-shaped witness
+than the Bitcoin proof — Rekor's log is append-only and publicly monitored, so an
+entry cannot be backdated, but the signer is still this repository. Treat the two
+as complementary, not redundant.
+
+`verify-anchors.mjs` reports that a bundle is present and its Rekor log index,
+but does not verify the signature — that needs X.509 chain validation, DSSE, and
+a Rekor inclusion proof, which is outside what a dependency-free script should
+claim to do. Verify it yourself with the Sigstore client:
+
+```bash
+sigstore verify identity \
+  --cert-identity 'https://github.com/4dbq9mznvp-ui/RiverAlpha/.github/workflows/daily-round.yml@refs/heads/main' \
+  --cert-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  --bundle data/anchor/crypto/<anchorId>.anchor.json.sigstore.json \
+  data/anchor/crypto/<anchorId>.anchor.json
+```
+
+The identity above is the signing workflow; anything else signing these files
+would be a finding, not a formality.
 
 ## Optional public round receipt
 
