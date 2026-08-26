@@ -18,7 +18,12 @@ earlier CC version, or under a software license, leaves that right unaddressed.
 
 ## Scope
 
-Covered by CC BY 4.0:
+This repository is dual-licensed, and this file is the authoritative statement
+of the split. `LICENSE` is kept as the unmodified MIT text so that automated
+license detection recognises it, which is why the boundary is described here
+rather than appended there.
+
+Covered by **CC BY 4.0** (this file):
 
     data/log/**            committed prediction rounds and resolved scores
     data/anchor/**         external timestamp payloads, proofs, and indexes
@@ -27,7 +32,18 @@ Covered by CC BY 4.0:
     docs/**                archived planning and analysis documents
     public-mirror/README.md   the public data specification
 
-Not covered here — the code is under the MIT terms in [LICENSE](LICENSE).
+Covered by **MIT** ([LICENSE](LICENSE)):
+
+    packages/**            engine (integrity, scoring, bootstrap, anchoring)
+    apps/**                ingest jobs and the web application
+    public-mirror/*.mjs    dependency-free verifiers
+    public-mirror/*.py     the Python chain verifier
+    .github/**             workflows
+    *.json, *.js, *.ts     configuration at the repository root
+
+The MIT text grants rights in "this software and associated documentation
+files". Where that phrase could be read to reach the prose documentation or the
+data, the split above governs: code is MIT, data and prose are CC BY 4.0.
 
 ## How to attribute
 
