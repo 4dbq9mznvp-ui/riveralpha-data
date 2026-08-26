@@ -12,10 +12,10 @@ publication time, source prices, recorded scores, or model-provider responses.
 
 ## Version boundaries
 
-- **Data/Audit Schema `v0.5`** identifies the fields and protected payload of
-  future round and score records (`dataSchemaVersion: "v0.5"`).
-  `v0.4` remains supported and is not rewritten: records committed under it are
-  hashed with the payload that version defined.
+- **Data/Audit Schema `v0.6`** identifies the fields and protected payload of
+  future round and score records (`dataSchemaVersion: "v0.6"`).
+  `v0.4` and `v0.5` remain supported and are not rewritten: records committed
+  under a version are hashed with the payload that version defined.
 - **Methodology `v0.3`** identifies forecast inputs and scoring conditions.
 - **Record Integrity Format `v1`** (`recordIntegrity.version: 1`) identifies the
   separate round/score hash envelope and linkage rules. It is unchanged by the
@@ -24,6 +24,35 @@ publication time, source prices, recorded scores, or model-provider responses.
 These are independent versions. Existing JSONL is not backfilled. A protected
 record must declare a supported Data/Audit Schema version, and
 `verify-records.mjs` includes that value in its recomputed payload hash.
+
+### What changed in `v0.6`
+
+Round records gained `providerReceipts`: a map from participant id to the
+identifiers the model provider itself issued for that call — its request id, the
+token counts it reported, the host that answered, the response headers, and the
+observed latency. A participant whose receipt could not be collected is recorded
+as `null` rather than omitted, so "no receipt" stays distinguishable from "not a
+participant".
+
+**This is not a signature, and it does not prove a response came from the
+provider.** None of the three providers signs its API responses, so that proof
+is not available from any of them today. What a receipt buys is *falsifiability*:
+the request id and token counts also exist in the provider's own systems, so
+fabricating a response would require inventing values the provider could
+contradict. It is an audit hook for someone who can ask the provider, not
+evidence a passive reader can check.
+
+Two limits worth stating plainly. Provider log retention is finite — typically
+weeks — so a request id from an old round eventually becomes unverifiable even
+in principle; a receipt is an audit hook for the recent window, not permanent
+evidence. And a receipt sits in the protected round payload, so altering one
+after the fact breaks the round record hash, but nothing stops an operator from
+recording a fabricated receipt at commit time. The receipt raises the cost of
+fabrication and creates a way to catch it; it does not make it impossible.
+
+Collection never blocks a round. If a provider changes a header name or the SDK
+returns an unexpected shape, the receipt is `null` and the prediction still
+commits — losing an audit field is not a reason to lose that day's forecast.
 
 ### What changed in `v0.5`
 
@@ -130,7 +159,8 @@ Rounds and scores created after the optional record chains begin carry
 `recordIntegrity = {version, prevRecordHash, recordHash}`. The round payload
 covers its prediction chain references, commit time, methodology, horizons,
 universe, entry prices and sources, failures, misses, optional receipt, and —
-from `v0.5` — the commit-time execution snapshot. The
+from `v0.5` — the commit-time execution snapshot, and from `v0.6` the provider
+receipts. The
 score payload covers its resolution timestamps, exit prices and sources,
 realized returns, benchmark and scoring configuration, participant scores, and
 references to the source round's prediction chain and optional round record
@@ -202,6 +232,24 @@ given block, which is a statement about the file, not a per-prediction receipt.
 Anchor payload files are immutable and `anchors.jsonl` is append-only. Proof
 files grow monotonically — upgrading a pending receipt to a Bitcoin proof only
 adds branches, never removes evidence.
+
+### Stamped documents
+
+`data/anchor/documents.jsonl` records files whose **contents** are timestamped,
+separately from the chain heads. The analysis pre-registration is stamped this
+way: its interest is not that a log state existed, but that a specific plan —
+which hypotheses, which thresholds, which milestones — was fixed before the data
+it will be applied to.
+
+```bash
+node verify-anchors.mjs --documents data/anchor .
+```
+
+Each entry is checked by hashing the file as it stands and comparing with the
+digest inside the proof. A file edited after stamping is reported as
+`SUPERSEDED` rather than as a failure: the old proof still establishes what the
+file said when it was stamped, and it simply does not cover the new text. This
+is why the plan is amended by appending rather than by editing.
 
 Anchors also carry a `.sigstore.json` bundle: a
 [Sigstore](https://www.sigstore.dev) signature recorded in the public Rekor
@@ -284,6 +332,27 @@ the prediction hash scheme.
   version it ran under, and records are never pooled across versions.
 
 Full methodology: https://river-alpha-web.vercel.app/methodology
+
+## License
+
+- **Data** (`data/**`) and this documentation — [CC BY 4.0](LICENSE-DATA).
+- **Verifier scripts** (`verify*.mjs`, `verify.py`) — [MIT](LICENSE).
+
+Attribution is required. A sufficient credit line:
+
+> RiverAlpha AI market-prediction benchmark, by Park jin young.
+> https://github.com/4dbq9mznvp-ui/riveralpha-data — CC BY 4.0.
+> Retrieved <date>, covering rounds through <roundId>.
+
+Include the round range. The log is append-only and grows daily, so a citation
+without a boundary cannot be checked against the chain hash it was drawn from.
+If you modify the data, say so — CC BY requires it, and for a benchmark that
+claims records were committed before outcomes, an unmarked modified copy is
+actively misleading.
+
+`LICENSE-DATA` states what these terms can and cannot cover: the underlying
+exchange prices are facts and are not ours to license; what is licensed is the
+selection, structure, and recording that make up the benchmark.
 
 ## Disclaimer
 

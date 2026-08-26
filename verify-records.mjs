@@ -8,7 +8,16 @@ const VERSION = 1;
 // 옛 버전을 빼면 그 버전으로 커밋된 보호 레코드가 검증 불가가 된다 — 추가만, 제거 금지.
 //   v0.4 : executionContext 이전 payload
 //   v0.5 : executionContext(호가·거래대금 스냅샷)가 보호 payload에 포함
-const SUPPORTED_DATA_SCHEMA_VERSIONS = ["v0.4", "v0.5"];
+//   v0.6 : providerReceipts(프로바이더 발급 식별자)가 보호 payload에 포함
+// 목록의 순서가 곧 시간순 — 새 버전은 반드시 끝에 덧붙일 것.
+const SUPPORTED_DATA_SCHEMA_VERSIONS = ["v0.4", "v0.5", "v0.6"];
+
+/** version이 minimum 이상인가. 문자열 비교가 아니라 목록 순서로 판정한다. */
+function atLeastSchema(version, minimum) {
+  return (
+    SUPPORTED_DATA_SCHEMA_VERSIONS.indexOf(version) >= SUPPORTED_DATA_SCHEMA_VERSIONS.indexOf(minimum)
+  );
+}
 
 function fail(message) {
   throw new Error(message);
@@ -52,10 +61,15 @@ function hashPayload(value) {
 function roundPayload(record) {
   // v0.4로 커밋된 레코드는 executionContext 키 없이 해싱됐다. 그 버전에 키를 끼워넣으면
   // 이미 커밋된 보호 라운드가 전부 검증 불가가 된다(append-only라 재작성 불가).
-  const executionContext =
-    record.dataSchemaVersion === "v0.4" ? {} : { executionContext: record.executionContext ?? null };
+  const executionContext = atLeastSchema(record.dataSchemaVersion, "v0.5")
+    ? { executionContext: record.executionContext ?? null }
+    : {};
+  const providerReceipts = atLeastSchema(record.dataSchemaVersion, "v0.6")
+    ? { providerReceipts: record.providerReceipts ?? null }
+    : {};
   return {
     ...executionContext,
+    ...providerReceipts,
     v: record.v,
     dataSchemaVersion: record.dataSchemaVersion,
     roundId: record.roundId,
