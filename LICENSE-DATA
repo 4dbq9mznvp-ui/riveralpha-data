@@ -1,0 +1,73 @@
+# RiverAlpha data and documentation license
+
+Copyright (c) 2026 Park jin young
+
+The material described under [Scope](#scope) is licensed under the
+**Creative Commons Attribution 4.0 International License (CC BY 4.0)**.
+
+- Human-readable summary: https://creativecommons.org/licenses/by/4.0/
+- Full legal code: https://creativecommons.org/licenses/by/4.0/legalcode
+
+The legal code at that URI is the license. It is linked rather than copied here
+so that the operative text is always the canonical one; CC BY 4.0 § 3(a)(1)(A)
+explicitly contemplates supplying a URI in place of a copy.
+
+CC BY **4.0** is used deliberately: it is the first CC version that grants the
+EU *sui generis* database right alongside copyright. A dataset licensed under an
+earlier CC version, or under a software license, leaves that right unaddressed.
+
+## Scope
+
+Covered by CC BY 4.0:
+
+    data/log/**            committed prediction rounds and resolved scores
+    data/anchor/**         external timestamp payloads, proofs, and indexes
+    *.md                   README, AGENTS, ARCHITECTURE, CHANGELOG,
+                           PROJECT_STATE, PREREGISTRATION
+    docs/**                archived planning and analysis documents
+    public-mirror/README.md   the public data specification
+
+Not covered here — the code is under the MIT terms in [LICENSE](LICENSE).
+
+## How to attribute
+
+Attribution is the point of choosing CC BY over CC0. This benchmark's value is
+that it gets cited, and the attribution requirement is what makes citation the
+default rather than an afterthought. A sufficient credit line:
+
+> RiverAlpha AI market-prediction benchmark, by Park jin young.
+> https://github.com/4dbq9mznvp-ui/riveralpha-data — CC BY 4.0.
+> Retrieved <date>, covering rounds through <roundId>.
+
+Naming the round range matters more than it looks. The log is append-only and
+grows daily, so "the RiverAlpha data" is not a fixed object; a citation without
+a boundary cannot be checked against the chain hash it was drawn from.
+
+If you modify the data, say so. CC BY 4.0 requires indicating changes, and for a
+benchmark whose whole claim is that records were committed before outcomes, an
+unmarked modified copy is actively misleading.
+
+## What this license can and cannot cover
+
+Stated plainly, because a license that overclaims is worse than none.
+
+**Covered.** The selection, structure, and recording that make up this
+benchmark: the round construction, the prediction payloads as committed, merkle
+roots and chain hashes, resolved scores, timestamp payloads, and the written
+documentation.
+
+**Not ours to license.** The underlying market prices are facts obtained from
+exchange APIs. Facts are generally not copyrightable, and this license does not
+purport to grant rights in the exchanges' data or to override their terms. What
+is licensed is our recording and arrangement of those observations, not the
+observations as such.
+
+**Model responses.** Each round records the raw response a model provider
+returned. Under most provider terms the requesting party holds whatever rights
+exist in model output, which is the basis on which these are published — but
+that rests on those terms rather than on anything this repository controls, and
+it is stated here as the position taken, not as a warranty.
+
+**No warranty.** CC BY 4.0 disclaims warranties. Separately and more
+importantly: nothing in this repository is investment advice, and a licensed
+copy of the data carries no representation that any score predicts anything.
