@@ -17,11 +17,17 @@
  * (네트워크 필요). 이 옵션 없이는 블록 높이와 계산된 머클루트를 출력만 하므로,
  * 아무 블록 탐색기에서 직접 대조할 수 있다.
  *
- *   node verify-anchors.mjs [rounds.jsonl] [scores.jsonl] [anchorDir] [--check-bitcoin]
+ * `--cache <path>` 는 이미 받아본 확정 블록을 파일에 재사용한다. **기본은 꺼짐**이고,
+ * 왜 그런지는 openBlockCache 위 주석에 적어뒀다 — 요약하면 캐시는 편의지 증거가 아니다.
+ *
+ *   node verify-anchors.mjs [rounds.jsonl] [scores.jsonl] [anchorDir] [--check-bitcoin] [--cache <path>]
+ *
+ * 종료코드: 0 정상 / 1 검증 실패(증거가 틀렸다) / 2 확인 못함(블록 탐색기에 닿지 못했다).
+ * 1과 2를 나눈 이유는 catch 블록 주석에 적어뒀다.
  */
 import { createHash } from "node:crypto";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 
 const ANCHOR_DOMAIN = "riveralpha/anchor/v1";
 const ANCHOR_VERSION = 1;
@@ -33,6 +39,19 @@ const BITCOIN_TAG = "0588960d73d71901";
 
 function fail(message) {
   throw new Error(message);
+}
+
+/**
+ * "증거가 틀렸다"와 "확인하지 못했다"는 전혀 다른 사건이다. 머클루트 불일치는 앵커가
+ * 주장하는 것이 거짓이라는 뜻이고, 429나 타임아웃은 공개 블록 탐색기가 오늘 바빴다는
+ * 뜻일 뿐 증거에 대해서는 아무것도 말해주지 않는다. 호출자가 둘을 다르게 처리할 수
+ * 있도록 전송 실패만 따로 던진다.
+ */
+class TransportError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "TransportError";
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,18 +255,107 @@ function headsForPrefix(rounds, scores, scope) {
 // 비트코인 대조 (선택)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function bitcoinMerkleRoot(height) {
-  const hashResponse = await fetch(`https://blockstream.info/api/block-height/${height}`, {
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!hashResponse.ok) fail(`blockstream: HTTP ${hashResponse.status} for height ${height}`);
+const BITCOIN_RETRIES = 5;
+const BITCOIN_BACKOFF_MS = 1_000;
+const BITCOIN_BACKOFF_CAP_MS = 30_000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 공개 API에는 레이트리밋이 있고, 앵커가 늘수록 한 번의 실행이 보내는 요청 수도 함께
+ * 는다. 2026-09-03에 실제로 429를 맞아 anchor-upgrade 잡이 세 번 빨간불이 났다.
+ * 한 번의 429로 전체 검증을 포기하는 것은 과잉 반응이라 물러났다 다시 시도한다.
+ *
+ * 지터를 섞는 이유: 없으면 여러 앵커의 재시도가 같은 리듬으로 몰려 같은 리밋을
+ * 그대로 다시 맞는다. 429가 아닌 4xx는 다시 물어봐도 같은 답이 오므로 즉시 포기한다.
+ */
+async function fetchWithRetry(url, label) {
+  let lastError;
+  let waitMs = 0;
+  for (let attempt = 0; attempt <= BITCOIN_RETRIES; attempt++) {
+    if (waitMs > 0) await sleep(Math.min(waitMs, BITCOIN_BACKOFF_CAP_MS));
+    const backoff = () => BITCOIN_BACKOFF_MS * 2 ** attempt * (1 + Math.random());
+
+    let response;
+    try {
+      response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    } catch (error) {
+      lastError = new TransportError(`blockstream: ${error?.message ?? String(error)} for ${label}`);
+      waitMs = backoff();
+      continue;
+    }
+
+    if (response.ok) return response;
+    if (response.status !== 429 && response.status < 500) {
+      throw new TransportError(`blockstream: HTTP ${response.status} for ${label}`);
+    }
+    lastError = new TransportError(`blockstream: HTTP ${response.status} for ${label}`);
+    const retryAfter = Number(response.headers.get("retry-after"));
+    waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1_000 : backoff();
+  }
+  throw lastError;
+}
+
+/**
+ * 확정된 블록의 (높이 → 해시·머클루트·시각)은 불변이라 한 번 받으면 다시 받을 이유가
+ * 없다. 4시간마다 전부 다시 조회하면 요청 수가 앵커 수에 비례해 계속 늘어난다.
+ *
+ * 그런데 캐시는 **검증이 대조하는 그 값**이다. 캐시를 믿는다는 것은 딱 그만큼 독립성을
+ * 파는 것이고, 오염된 캐시는 틀린 증거를 통과시킨다. 그래서 기본은 꺼짐이다 — 공개
+ * 검증자가 아무 옵션 없이 돌리면 예전 그대로 전부 네트워크에서 다시 받는다. 켜는 쪽은
+ * 하루에 몇 번씩 같은 블록을 다시 묻는 우리 CI뿐이고, 그 캐시 파일은 커밋하지도
+ * 미러에 싣지도 않는다. **권위 있는 확인은 언제나 캐시 없이 돌린 실행이다.**
+ */
+function openBlockCache(path) {
+  if (!path) return null;
+  let entries = {};
+  if (existsSync(path)) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      if (parsed?.v === 1 && parsed.blocks && typeof parsed.blocks === "object") entries = parsed.blocks;
+    } catch {
+      // 캐시가 깨졌으면 조용히 버리고 네트워크에서 다시 받는다. 캐시는 편의일 뿐이라
+      // 여기서 실패시키면 그게 더 나쁜 결과다.
+      entries = {};
+    }
+  }
+  let dirty = false;
+  return {
+    get(height) {
+      const entry = entries[String(height)];
+      if (
+        typeof entry?.blockHash !== "string" ||
+        typeof entry?.merkleRoot !== "string" ||
+        typeof entry?.timestamp !== "number"
+      ) {
+        return null;
+      }
+      return entry;
+    },
+    set(height, value) {
+      entries[String(height)] = value;
+      dirty = true;
+    },
+    save() {
+      if (!dirty) return;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, `${JSON.stringify({ v: 1, blocks: entries }, null, 2)}\n`);
+    },
+  };
+}
+
+async function bitcoinMerkleRoot(height, cache) {
+  const cached = cache?.get(height);
+  if (cached) return cached;
+
+  const hashResponse = await fetchWithRetry(`https://blockstream.info/api/block-height/${height}`, `height ${height}`);
   const blockHash = (await hashResponse.text()).trim();
-  const blockResponse = await fetch(`https://blockstream.info/api/block/${blockHash}`, {
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!blockResponse.ok) fail(`blockstream: HTTP ${blockResponse.status} for block ${blockHash}`);
+  const blockResponse = await fetchWithRetry(`https://blockstream.info/api/block/${blockHash}`, `block ${blockHash}`);
   const block = await blockResponse.json();
-  return { blockHash, merkleRoot: block.merkle_root, timestamp: block.timestamp };
+
+  const result = { blockHash, merkleRoot: block.merkle_root, timestamp: block.timestamp };
+  cache?.set(height, result);
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -256,7 +364,7 @@ async function bitcoinMerkleRoot(height) {
  * 문서 스탬프 검증 — 체인이 아니라 **파일 내용**이 언제부터 이 상태였는지를 본다.
  * 사전등록 계획처럼 데이터보다 먼저 고정됐음을 보여야 하는 파일에 쓴다.
  */
-async function verifyDocuments(anchorDir, repoRoot, checkBitcoin) {
+async function verifyDocuments(anchorDir, repoRoot, checkBitcoin, cache) {
   const indexPath = join(anchorDir, "documents.jsonl");
   if (!existsSync(indexPath)) {
     console.log("document verification OK: no documents stamped yet");
@@ -310,7 +418,7 @@ async function verifyDocuments(anchorDir, repoRoot, checkBitcoin) {
         console.log(`    merkle root: ${merkleRoot}`);
         continue;
       }
-      const block = await bitcoinMerkleRoot(height);
+      const block = await bitcoinMerkleRoot(height, cache);
       if (block.merkleRoot !== merkleRoot) {
         fail(`${label}: block ${height} merkle root mismatch (proof ${merkleRoot}, chain ${block.merkleRoot})`);
       }
@@ -332,7 +440,7 @@ async function verifyDocuments(anchorDir, repoRoot, checkBitcoin) {
   }
 }
 
-async function verify(roundsPath, scoresPath, anchorDir, checkBitcoin) {
+async function verify(roundsPath, scoresPath, anchorDir, checkBitcoin, cache) {
   const indexPath = join(anchorDir, "anchors.jsonl");
   if (!existsSync(indexPath)) {
     console.log("anchor verification OK: no anchors published yet");
@@ -454,7 +562,7 @@ async function verify(roundsPath, scoresPath, anchorDir, checkBitcoin) {
         console.log(`    merkle root: ${merkleRoot}`);
         continue;
       }
-      const block = await bitcoinMerkleRoot(height);
+      const block = await bitcoinMerkleRoot(height, cache);
       if (block.merkleRoot !== merkleRoot) {
         fail(`${label}: block ${height} merkle root mismatch (proof ${merkleRoot}, chain ${block.merkleRoot})`);
       }
@@ -483,21 +591,48 @@ async function verify(roundsPath, scoresPath, anchorDir, checkBitcoin) {
 const args = process.argv.slice(2);
 const checkBitcoin = args.includes("--check-bitcoin");
 const documentsOnly = args.includes("--documents");
-const positional = args.filter((arg) => !arg.startsWith("--"));
+
+// `--cache <path>` 의 값은 `--` 로 시작하지 않아 그냥 두면 위치 인자로 빨려 들어간다.
+const cacheIndex = args.indexOf("--cache");
+const cachePath = cacheIndex === -1 ? null : args[cacheIndex + 1];
+if (cacheIndex !== -1 && (!cachePath || cachePath.startsWith("--"))) {
+  console.error("--cache needs a path, e.g. --cache .anchor-cache/blocks.json");
+  process.exit(2);
+}
+const positional = args.filter(
+  (arg, index) => !arg.startsWith("--") && !(cacheIndex !== -1 && index === cacheIndex + 1),
+);
+
+const cache = openBlockCache(cachePath);
 
 try {
   if (documentsOnly) {
-    await verifyDocuments(positional[0] ?? "data/anchor", positional[1] ?? ".", checkBitcoin);
+    await verifyDocuments(positional[0] ?? "data/anchor", positional[1] ?? ".", checkBitcoin, cache);
   } else {
     await verify(
       positional[0] ?? "data/log/crypto/rounds.jsonl",
       positional[1] ?? "data/log/crypto/scores.jsonl",
       positional[2] ?? "data/anchor/crypto",
       checkBitcoin,
+      cache,
     );
   }
 } catch (error) {
   const kind = documentsOnly ? "document" : "anchor";
-  console.error(`${kind} verification FAILED: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof TransportError) {
+    // 여기서 종료코드를 1과 나누는 것이 요점이다. 둘을 같은 실패로 묶으면 공개 API가
+    // 바쁜 날마다 잡이 빨간불이 되고, 빨간불이 일상이 되면 진짜 머클루트 불일치가
+    // 났을 때 아무도 쳐다보지 않는다. 경보는 드물어야 경보다.
+    console.error(`${kind} verification INCOMPLETE: ${message}`);
+    console.error("  증거가 틀렸다는 뜻이 아니라 블록 탐색기에 닿지 못했다는 뜻이다.");
+    console.error("  오프라인 검증(--check-bitcoin 없이)은 영향받지 않으며 이미 통과했다.");
+    process.exitCode = 2;
+  } else {
+    console.error(`${kind} verification FAILED: ${message}`);
+    process.exitCode = 1;
+  }
+} finally {
+  // 중간에 실패했더라도 그때까지 받아둔 블록은 남긴다. 다음 실행이 거기서부터 이어간다.
+  cache?.save();
 }
