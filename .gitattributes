@@ -9,5 +9,5 @@ data/anchor/**/*.anchor.json -text
 data/anchor/**/*.ots binary
 data/anchor/**/anchors.jsonl -text
 data/anchor/documents.jsonl -text
-PREREGISTRATION.md -text
+PREREGISTRATION*.md -text
 *.ots binary

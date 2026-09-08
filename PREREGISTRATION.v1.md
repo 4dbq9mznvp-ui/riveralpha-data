@@ -146,56 +146,7 @@ amended test is disclosed as such in the milestone report.
 
 Analyses always name the plan version they ran under.
 
-### `v1.1` — 2026-09-07 · statement of the Šidák interval level
-
-**What changed.** Under [Primary hypotheses](#primary-hypotheses) the plan reads:
-"the interval level is Šidák-adjusted to hold the family-wide error rate at 5%:
-for m simultaneous tests, each interval is computed at level
-`1 − (1 − 0.05)^(1/m)`." The preceding sentence sets that level at 95%, so
-"level" there names a confidence level — and the expression given is the
-corrected per-test **significance level** α, which is the complement of the
-confidence level, not the level itself. At m = 6 the sentence as written asks
-for a 0.85% interval. The commitment is restated without the ambiguity:
-
-> For m simultaneous tests, each interval is computed at confidence level
-> `(1 − 0.05)^(1/m)`, equivalently at per-test significance level
-> `α = 1 − (1 − 0.05)^(1/m)`. At m = 6 that is a 99.15% interval.
-
-**Why.** The expression is correct as an α and incorrect as a level, so the
-sentence had two readings and only one of them is arithmetically coherent. A
-plan whose stated threshold can be read two ways gives back part of the freedom
-it exists to remove, and the reading has to be fixed before any milestone
-report applies it rather than after.
-
-**What did not change.** No hypothesis, metric, family definition, milestone
-trigger, or numeric threshold moves. `1 − (1 − 0.05)^(1/m)` remains the per-test
-α; the family-wide error rate remains 5%; the family remains the one defined in
-the same section, including the regime cells added at M3.
-
-**Implementation status.** `familyThreshold` in
-`packages/engine/src/scoring.ts` already computes the per-test α as
-`1 − (1 − alpha)^(1/m)` and derives its two-sided threshold from it, so the
-badge rule was never affected by the wording. The BCa routine in
-`packages/engine/src/bootstrap.ts` accepts an `alpha` and currently runs at the
-unadjusted 0.05 for the leaderboard's displayed intervals, which are
-descriptive and carry no hypothesis claim. No family-adjusted interval has been
-computed to date because no milestone has triggered: M1 requires n ≥ 120 on the
-1d track for at least four participants, and the fourth-ranked row stands at
-n = 71.
-
-**Data already observed.** The 1d, 7d and 30d logs through 2026-09-07 have been
-observed, and this amendment is therefore made with data in hand. It bears on
-no test that has been run — no milestone report exists — and it corrects the
-statement of a rule rather than the rule. Disclosed here as this section
-requires.
-
-**The v1 proof.** Appending this section changes the bytes of
-`PREREGISTRATION.md`, so the Bitcoin-confirmed proof for plan `v1` no longer
-matches this file. Those bytes and that proof are preserved unchanged as
-`PREREGISTRATION.v1.md` and `PREREGISTRATION.v1.md.ots`, recorded under their
-own entry in `data/anchor/documents.jsonl` with the original digest
-`ee78172929270d8a…` and stamp time. `v1` therefore remains provably earlier
-than the data it covers, independently of anything done to this file later.
+*No amendments yet.*
 
 ## Timestamp
 

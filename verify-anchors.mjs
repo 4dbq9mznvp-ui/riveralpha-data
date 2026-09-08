@@ -379,6 +379,7 @@ async function verifyDocuments(anchorDir, repoRoot, checkBitcoin, cache) {
   let confirmed = 0;
   let pendingOnly = 0;
   let changed = 0;
+  const checked = [];
 
   for (const doc of docs) {
     const label = doc.path ?? "?";
@@ -404,6 +405,13 @@ async function verifyDocuments(anchorDir, repoRoot, checkBitcoin, cache) {
     const pending = detached.attestations.filter((s) => s.attestation.type === "pending");
     const state = matchesNow === null ? "file absent" : matchesNow ? "current" : "SUPERSEDED";
 
+    checked.push({ label, bitcoin, pending, state });
+  }
+
+  // 2단계: 네트워크 대조. 1단계(로컬 검사)를 전부 끝낸 뒤에만 시작한다 — 아래에서
+  // 탐색기에 닿지 못하면 그 자리에서 멈추므로, 둘을 한 루프에 섞으면 뒤쪽 항목의
+  // 로컬 검사가 통째로 건너뛰어진다.
+  for (const { label, bitcoin, pending, state } of checked) {
     if (bitcoin.length === 0) {
       pendingOnly++;
       console.log(`~ ${label}  PENDING via ${new Set(pending.map((s) => s.attestation.uri)).size} calendar(s)  [${state}]`);
@@ -458,6 +466,7 @@ async function verify(roundsPath, scoresPath, anchorDir, checkBitcoin, cache) {
   let pendingOnly = 0;
   let confirmed = 0;
   let previous = null;
+  const checked = [];
 
   for (const anchor of anchors) {
     const label = anchor.anchorId ?? "?";
@@ -521,6 +530,14 @@ async function verify(roundsPath, scoresPath, anchorDir, checkBitcoin, cache) {
     const bitcoin = detached.attestations.filter((site) => site.attestation.type === "bitcoin");
     const pending = detached.attestations.filter((site) => site.attestation.type === "pending");
 
+    checked.push({ anchor, label, bitcoin, pending });
+  }
+
+  // 2단계: 네트워크 대조. 위의 로컬 검사가 **모든** 앵커에 대해 끝난 뒤에 시작한다.
+  // 여기서 탐색기가 429를 내면 그 자리에서 멈추는데, 한 루프로 섞여 있으면 뒤쪽
+  // 앵커의 payload 해시·heads 재계산이 실행되지 않은 채 종료되고, 그 상태로
+  // "오프라인 검증은 이미 통과했다"고 안내하게 된다 — 사실이 아닌 안내가 된다.
+  for (const { anchor, label, bitcoin, pending } of checked) {
     // 6. Sigstore 번들은 **있다는 사실만** 보고한다. 서명 검증에는 X.509 체인 검증,
     // DSSE, Rekor 포함증명이 필요해서 의존성 없는 스크립트의 범위를 넘는다. 검증한
     // 척하는 것보다, 있다는 것과 여기서 검증하지 않았다는 것을 함께 말하는 편이 낫다.
