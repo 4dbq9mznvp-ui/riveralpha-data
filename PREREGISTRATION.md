@@ -197,6 +197,140 @@ own entry in `data/anchor/documents.jsonl` with the original digest
 `ee78172929270d8a…` and stamp time. `v1` therefore remains provably earlier
 than the data it covers, independently of anything done to this file later.
 
+### `v1.2` — 2026-09-08 · what counts as an independent observation
+
+**What changed.** The independent-series rule promises that overlapping windows
+are never counted twice. The implementation did not deliver it. Anchor
+eligibility was decided by comparing calendar day indices, while a round is
+scored over the interval that starts at its `committedAt`. Commit times drift
+across the day — 00:06 to 09:52 UTC on the log so far — so consecutive anchors
+shared hours of the same price path. On the log as of 2026-09-08, 39 of 79
+adjacent 1d anchor pairs overlapped, by up to 9 hours 16 minutes of a 24 hour
+window, and 7 of 10 did on 7d. The rule is restated so that it means what it
+says:
+
+> An anchor's window runs from its `committedAt` to `committedAt + horizon`. A
+> round is eligible as the next anchor only if its window start is at or after
+> the previous anchor's window end, compared as instants rather than as calendar
+> days. The calendar bucket rule is unchanged: at most one anchor per ISO week
+> at 7d and per calendar month at 30d. The 1d track no longer treats every round
+> as an anchor, because at 1d the drift in commit time is a large fraction of
+> the window.
+
+**Why.** Independence is the assumption every interval and every t statistic in
+this plan rests on. Counting two windows that share nine hours of the same price
+movement as two observations inflates n, narrows every interval, and makes the
+significance clock run faster than the evidence does. The defect was in the
+implementation rather than in the plan's intent, but the plan's numbers were
+computed with it, so correcting it is a change to the record and belongs here.
+
+Pinning the job to a fixed commit time was considered and rejected as the fix. A
+scheduled runner cannot guarantee an instant, and it would leave the existing
+log unrepaired. The rule has to tolerate drift.
+
+**A known residual, stated rather than hidden.** The exit price is the close of
+the one-hour candle containing `committedAt + horizon`, so scoring actually
+resolves up to one hour after the window end defined above. Two anchors exactly
+one horizon apart therefore still share at most one hour of price path — at most
+4% of a 1d window. That hour is deliberately not counted as overlap. Counting it
+would make even a perfectly regular daily schedule overlap with itself, dropping
+every second round forever. The residual is bounded by one candle and is
+recorded here as a limitation of the independent series, not as something the
+rule removes.
+
+**The stricter rule came first, and it was replaced after both effects were
+known.** The first draft of this amendment, committed locally on 2026-09-08 and
+never published or timestamped, ended the window at the close of the exit
+candle, and it said — truthfully — that the rule was fixed before its effect on
+any participant was computed. That effect was then computed: 43 anchors on the
+1d track rather than 52, gpt-5.5 moving from last among participants to second
+(mean IC 0.050 against 0.001 under the rule adopted here), and claude-sonnet-5
+at n = 30 with mean IC 0.091 against n = 37 and 0.117 here. The rule was
+replaced the same evening, on the ground stated above — that discarding about a
+sixth of the sample to remove a bounded 4% artefact is a bad trade. That ground
+is an argument about the window, not about any participant, but the replacement
+was made with the effect of both rules in view, so it is recorded as such and
+not as a rule chosen blind. The draft's claim of having been fixed before its
+effect was computed does not carry over to the rule adopted here. Both outcomes
+are published so that a reader can weigh the choice against its effect rather
+than take the reasoning on trust.
+
+**Effect on the record.** Applied to the log as of 2026-09-08, current era, 1d:
+
+| participant | n before | n after | mean IC before | mean IC after |
+|---|---:|---:|---:|---:|
+| *1d anchors* | *80* | *52* | | |
+| claude-sonnet-5 | 58 | 37 | 0.0879 | 0.1173 |
+| claude-opus-4-8 | 78 | 50 | 0.0142 | 0.0243 |
+| gemini-3.5-flash | 73 | 47 | 0.0097 | 0.0349 |
+| claude-fable-5 | 58 | 37 | 0.0113 | 0.0071 |
+| gpt-5.5 | 74 | 48 | −0.0005 | 0.0011 |
+
+The 1d track loses 35% of its observations. The order changes: gemini-3.5-flash
+moves from fourth among participants to second. On 7d, 11 anchors become 10 and
+every participant's mean IC falls; the 7d order moves more, because 7d has ten
+observations and almost nothing there is separable from anything else.
+
+**This amendment is made with the results in view, and it moves them.** That is
+the disclosure this section exists to force, so it is stated plainly rather than
+in a footnote. Three things bear on how much weight to give it. The defect was
+found by reading the anchor-selection code against the scoring code, not by
+inspecting rankings. The window-end definition was chosen on the argument set
+out above, with the rejected alternative's effect published beside it. And the
+sample loss falls on every participant at once, which is the shape a correction
+to a shared definition should have.
+
+**Retroactive.** The corrected rule applies to the whole log, not from this date
+forward. Nothing in the committed data changes: rounds, predictions, prices and
+per-round scores are untouched and their hashes and anchors still verify. Only
+which of those already-committed rounds enter the independent series changes,
+and that is a deterministic function any third party recomputes from the same
+raw log. A forward-only cutover would instead leave two incompatible definitions
+of n inside one methodology era, which is the thing era boundaries exist to
+prevent.
+
+**What did not change.** No hypothesis, metric, baseline, family definition or
+threshold moves. M1 still triggers at n ≥ 120 on the 1d track for at least four
+participants; the threshold is not restated in terms of the scarcer samples,
+because lowering a bar after seeing that it moved away is exactly the freedom
+this plan gives up. The projected dates recede accordingly — roughly by the
+ratio the sample count falls, and further if commit times drift more.
+
+**Two related corrections, recorded here but not plan changes.**
+
+The `tilt:<model>` reference line was averaging that model's signals from
+earlier methodology eras, although the plan already forbids pooling across eras.
+The code now cuts the signal history at the era boundary; the price history
+behind the three baselines is market data and is not cut. On the log before this
+amendment's anchor change, that moved `tilt:claude-opus-4-8` from n = 77, IC
+0.1304 to n = 68, IC 0.0985, and that participant's `IC − tilt` from −0.1223 to
+−0.0849. No baseline lost a sample. This brings the implementation to the stated
+rule rather than changing it, and no milestone report has ever used the old
+values.
+
+The paired gap between two rows was being computed twice — once for the tier
+column and once for the vs-leader column — under two different seeds, so the two
+columns could in principle separate a pair and not separate it. They are now one
+computation, seeded from the participant pair in sorted order. Published
+interval bounds shift slightly as a result. This is recorded next to the
+prohibition on re-running an analysis with a different seed to obtain a
+different result: it is the merging of two implementations of one comparison,
+not a search across seeds, and the estimand is unchanged.
+
+**Proofs.** Plan `v1` remains frozen at `PREREGISTRATION.v1.md` with its
+Bitcoin-confirmed proof. This file's bytes now carry `v1`, `v1.1` and `v1.2` and
+are stamped as one document; the amendments are not separately timestamped from
+each other, only jointly with the text that contains them.
+
+**Settled and stamped on different dates.** The rule, figures and reasoning in
+`v1.2` were settled on 2026-09-08. The section was timestamped on 2026-09-14,
+and the proof establishes only that later date. The only text added between the
+two is the account above of the first draft and this paragraph. In that
+interval, under the rule adopted here, claude-sonnet-5's 1d row crossed the
+family-corrected badge threshold (t = 2.70 against 2.63 at n = 38, on the log as
+of 2026-09-12). That row's statistic under the stricter first-draft rule was not
+computed. Nothing in the rule was changed on account of it.
+
 ## Timestamp
 
 `PREREGISTRATION.md` is timestamped with OpenTimestamps. The proof lives at
